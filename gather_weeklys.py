@@ -98,16 +98,19 @@ if __name__ == "__main__":
                 if expirys[i].strip() == '': expirys[i] = None
                 else: expirys[i] = expiry_dates[i]
             expdata = dict(zip(EXPCOLHEADERS, expirys))
+            tick = row[0].replace('*', '')
+            tick = tick.replace(' ', '')
             ld = str(row[3]).split('.')[0]
             try:
-                print >> sys.stderr, "Writing %s for %s" % (row[0], ld)
-                conn.execute(table.insert(), ticker=row[0].replace('*',''),
+                conn.execute(table.insert(), ticker=tick,
                                              name=row[1].replace('*',''),
                                              type=row[2].replace('*',''),
                                              list_date=ld,
                                              **expdata)
+                print >> sys.stderr, "Writing %s for %s" % (tick, ld)
             except IntegrityError as err:
-                if 'duplicate key' in str(err): pass
+                if 'duplicate key' in str(err): 
+                    print >> sys.stderr, "%s for %s already there" % (tick, ld)
                 else: raise(err)
 
     print >> sys.stderr, "Data written."
