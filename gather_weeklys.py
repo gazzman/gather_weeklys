@@ -102,15 +102,19 @@ if __name__ == "__main__":
             tick = tick.replace(' ', '')
             ld = str(row[3]).split('.')[0]
             try:
-                conn.execute(table.insert(), ticker=tick,
-                                             name=row[1].replace('*',''),
-                                             type=row[2].replace('*',''),
-                                             list_date=ld,
-                                             **expdata)
+                conn.execute(table.insert(), ticker=tick, 
+                             name=row[1].replace('*',''), 
+                             type=row[2].replace('*',''), list_date=ld, 
+                             **expdata)
                 print >> sys.stderr, "Writing %s for %s" % (tick, ld)
             except IntegrityError as err:
                 if 'duplicate key' in str(err): 
-                    print >> sys.stderr, "%s for %s already there" % (tick, ld)
+                    conn.execute(table.update().where(table.c.ticker==tick)\
+                                               .where(table.c.list_date==ld),
+                                 ticker=tick, name=row[1].replace('*',''),
+                                 type=row[2].replace('*',''), list_date=ld,
+                                 **expdata)
+                    print >> sys.stderr, "Updated %s for %s" % (tick, ld)
                 else: raise(err)
 
     print >> sys.stderr, "Data written."
