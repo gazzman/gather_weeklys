@@ -15,23 +15,17 @@ import xlrd
 
 STARTPATTERN = 'LIST OF AVAILABLE WEEKLYS OPTIONS'
 HEADERPATTERN = 'Ticker Symbol'
-EXPCOLHEADERS = ['expiry_0', 'expiry_1', 'expiry_2',
-                 'expiry_3', 'expiry_4', 'expiry_5']
+EXPCOLNUM = 6
 
 def gen_table(tablename, metadata, schema=None):
-    table = Table(tablename, metadata,
-                  Column('ticker', VARCHAR(21), index=True, primary_key=True),
-                  Column('name', String),
-                  Column('type', String),
-                  Column('list_date', Date, index=True, primary_key=True),
-                  Column(EXPCOLHEADERS[0], Date),
-                  Column(EXPCOLHEADERS[1], Date),
-                  Column(EXPCOLHEADERS[2], Date),
-                  Column(EXPCOLHEADERS[3], Date),
-                  Column(EXPCOLHEADERS[4], Date),
-                  Column(EXPCOLHEADERS[5], Date),
-                  schema=schema)
-    return table
+    expcols = [Column('expiry_%i' % i, Date) for i in xrange(0, EXPCOLNUM)]
+    return Table(tablename, metadata,
+                 Column('ticker', VARCHAR(21), index=True, primary_key=True),
+                 Column('name', String),
+                 Column('type', String),
+                 Column('list_date', Date, index=True, primary_key=True),
+                 *expcols,
+                 schema=schema)
 
 if __name__ == "__main__":
     description = 'A utility for storing the CBOE\'s weeklys in a database.'
