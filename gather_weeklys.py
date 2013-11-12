@@ -1,9 +1,11 @@
 #!/usr/bin/python
-__version__ = ".00"
+__version__ = ".01"
 __author__ = "gazzman"
 __copyright__ = "(C) 2013 gazzman GNU GPL 3."
 __contributors__ = []
+from datetime import datetime
 import argparse
+import re
 import sys
 
 from sqlalchemy import create_engine, MetaData, Table
@@ -11,21 +13,49 @@ from sqlalchemy import Column, Date, String
 from sqlalchemy.schema import CreateSchema
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.dialects.postgresql import VARCHAR
-import xlrd
+from xlrd import open_workbook, xldate_as_tuple
 
-STARTPATTERN = 'LIST OF AVAILABLE WEEKLYS OPTIONS'
-HEADERPATTERN = 'Ticker Symbol'
-EXPCOLNUM = 6
+STARTPATTERN = re.compile('LIST OF AVAILABLE WEEKLY[S]? OPTIONS'.lower())
+EXPCOLNUM = 7
+
+# adjust depending on spreadsheet headers
+DBCOLHEAD = {'ticker': 'ticker',
+             'name': 'name',
+             'type': 'product_type',
+             'list_date': 'list_date',
+            }
 
 def gen_table(tablename, metadata, schema=None):
     expcols = [Column('expiry_%i' % i, Date) for i in xrange(0, EXPCOLNUM)]
     return Table(tablename, metadata,
-                 Column('ticker', VARCHAR(21), index=True, primary_key=True),
-                 Column('name', String),
-                 Column('type', String),
-                 Column('list_date', Date, index=True, primary_key=True),
+                 Column(DBCOLHEAD['ticker'], VARCHAR(21), index=True, primary_key=True),
+                 Column(DBCOLHEAD['name'], String),
+                 Column(DBCOLHEAD['type'], String),
+                 Column(DBCOLHEAD['list_date'], Date, index=True, primary_key=True),
                  *expcols,
                  schema=schema)
+
+def parse_expiry_data(week, first_header_pattern='ticker', datemode=0):
+    headrow = [ row for row in week if first_header_pattern in row[0].lower() ]
+    assert len(headrow) == 1
+    headrowidx = week.index(headrow[0])
+    expirys = [ [ y for y in x if y != '' ] for x in week[1:headrowidx] if str(x) != '']
+    expiry_data = [ (x[0], [ datetime(*xldate_as_tuple(y, datemode)).date().isoformat() for y in x[1:] ]) 
+                    for x in expirys if len(x) > 0 
+                  ]
+    data = [ dict(zip(headrow[0], row)) for row in week[headrowidx:] ]
+    return dict(expiry_data), data
+
+def gen_dbrow(expirys, rowdict):
+    dbrow = dict([ (c, rowdict[k]) for c in DBCOLHEAD.values() for k in rowdict
+                                   if c in k.strip().lower().replace(' ', '_') ])
+    dbrow.update(expirys)
+    dbrow[DBCOLHEAD['list_date']] = datetime.strptime(str(dbrow[DBCOLHEAD['list_date']])\
+                                            .split('.')[0], '%Y%m%d').date().isoformat()
+    for k in DBCOLHEAD:
+        dbrow[DBCOLHEAD[k]] = dbrow[DBCOLHEAD[k]].replace('*', '').strip()
+    return dbrow
+
 
 if __name__ == "__main__":
     description = 'A utility for storing the CBOE\'s weeklys in a database.'
@@ -63,12 +93,12 @@ if __name__ == "__main__":
                                                                 args.tablename)
 
     # Parse the xls data into a list
-    wb = xlrd.open_workbook(args.filename)
+    wb = open_workbook(args.filename)
     sh = wb.sheet_by_index(0)
     data = [sh.row_values(x) for x in xrange(sh.nrows)]
-    starts = [x for x in data if STARTPATTERN in x[0]]
-    if len(starts) < 1: raise Exception('No list detected with %s' 
-                                        % STARTPATTERN)
+    starts = [x for x in data if STARTPATTERN.search(x[0].lower())]
+    if len(starts) < 1: 
+        raise Exception('No list detected in %s' % args.filename)
 
     # Separate the table by week    
     sidxs = [data.index(x) for x in starts]
@@ -78,37 +108,30 @@ if __name__ == "__main__":
         data = data[0:sidxs[-1]]
         sidxs = sidxs[:-1]
 
-    # For each week, write the data to the database
     for week in weeks:
-        header = [x for x in week if HEADERPATTERN in x[0]][0]
-        if len(header) < 1: raise Exception('No header detected with %s'
-                                            % HEADERPATTERN)
-        start = week.index(header)
-        datarows = [x for x in week[start+1:] if x[0].strip() != '']
-        expiry_dates = [str(x).split('.')[0] for x in header[-6:]]
-        for row in datarows:
-            expirys = row[-6:]
-            for i in xrange(len(expirys)):
-                if expirys[i].strip() == '': expirys[i] = None
-                else: expirys[i] = expiry_dates[i]
-            expdata = dict(zip(EXPCOLHEADERS, expirys))
-            tick = row[0].replace('*', '')
-            tick = tick.replace(' ', '')
-            ld = str(row[3]).split('.')[0]
+        expiry_data, rowdicts = parse_expiry_data(week, datemode=wb.datemode)
+        for rowdict in rowdicts:
+            weekly_type = [ k for k, v in rowdict.items() if str(v).lower() == 'x' ]
+            expirys = [ v for k, v in expiry_data.items() for w in weekly_type if w.lower() in k.lower() ]
+            while len(expirys) > 1:
+                    expirys[0] += expirys[-1]
+                    expirys = expirys[:-1]
             try:
-                conn.execute(table.insert(), ticker=tick, 
-                             name=row[1].replace('*',''), 
-                             type=row[2].replace('*',''), list_date=ld, 
-                             **expdata)
-                print >> sys.stderr, "Writing %s for %s" % (tick, ld)
-            except IntegrityError as err:
-                if 'duplicate key' in str(err): 
-                    conn.execute(table.update().where(table.c.ticker==tick)\
-                                               .where(table.c.list_date==ld),
-                                 ticker=tick, name=row[1].replace('*',''),
-                                 type=row[2].replace('*',''), list_date=ld,
-                                 **expdata)
-                    print >> sys.stderr, "Updated %s for %s" % (tick, ld)
-                else: raise(err)
-
-    print >> sys.stderr, "Data written."
+                expirys = list(set(expirys[0]))
+                expirys.sort()
+                expirys = zip(['expiry_%i' % i for i in xrange(0, EXPCOLNUM)], expirys)
+                dbrow = gen_dbrow(expirys, rowdict)
+                try:
+                    conn.execute(table.insert(), **dbrow)
+                    print >> sys.stderr, "Writing %s for %s" % (dbrow[DBCOLHEAD['ticker']],
+                                                                dbrow[DBCOLHEAD['list_date']])
+                except IntegrityError as err:
+                    if 'duplicate key' in str(err): 
+                        conn.execute(table.update().where(table.c.ticker==dbrow[DBCOLHEAD['ticker']])\
+                                                   .where(table.c.list_date==dbrow[DBCOLHEAD['list_date']]),
+                                     **dbrow)
+                        print >> sys.stderr, "Updating %s for %s" % (dbrow[DBCOLHEAD['ticker']],
+                                                                    dbrow[DBCOLHEAD['list_date']])
+                    else: raise(err)
+            except IndexError:
+                pass
