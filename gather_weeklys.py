@@ -113,11 +113,8 @@ if __name__ == "__main__":
         for rowdict in rowdicts:
             weekly_type = [ k for k, v in rowdict.items() if str(v).lower() == 'x' ]
             expirys = [ v for k, v in expiry_data.items() for w in weekly_type if w.lower() in k.lower() ]
-            while len(expirys) > 1:
-                    expirys[0] += expirys[-1]
-                    expirys = expirys[:-1]
             try:
-                expirys = list(set(expirys[0]))
+                expirys = max(expirys, key=len)
                 expirys.sort()
                 expirys = zip(['expiry_%i' % i for i in xrange(0, EXPCOLNUM)], expirys)
                 dbrow = gen_dbrow(expirys, rowdict)
@@ -133,5 +130,5 @@ if __name__ == "__main__":
                         print >> sys.stderr, "Updating %s for %s" % (dbrow[DBCOLHEAD['ticker']],
                                                                     dbrow[DBCOLHEAD['list_date']])
                     else: raise(err)
-            except IndexError:
+            except ValueError:
                 pass
