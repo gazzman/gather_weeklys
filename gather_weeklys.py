@@ -25,6 +25,16 @@ DBCOLHEAD = {'ticker': 'ticker',
              'list_date': 'list_date',
             }
 
+def xldate_as_tuple_(xldate_as_int, datemode):
+    try:
+        return xldate_as_tuple(xldate_as_int, datemode)
+    except ValueError:
+        month, dayyear = xldate_as_int.split('/')
+        day = dayyear[0:2]
+        year = '20%s' % dayyear[-2:]
+        print year, month, day
+        return (int(year), int(month), int(day))
+    
 def gen_table(tablename, metadata, schema=None):
     expcols = [Column('expiry_%i' % i, Date) for i in xrange(0, EXPCOLNUM)]
     return Table(tablename, metadata,
@@ -40,7 +50,7 @@ def parse_expiry_data(week, first_header_pattern='ticker', datemode=0):
     assert len(headrow) == 1
     headrowidx = week.index(headrow[0])
     expirys = [ [ y for y in x if y != '' ] for x in week[1:headrowidx] if str(x) != '']
-    expiry_data = [ (x[0], [ datetime(*xldate_as_tuple(y, datemode)).date().isoformat() for y in x[1:] ]) 
+    expiry_data = [ (x[0], [ datetime(*xldate_as_tuple_(y, datemode)).date().isoformat() for y in x[1:] ]) 
                     for x in expirys if len(x) > 0 
                   ]
     data = [ dict(zip(headrow[0], row)) for row in week[headrowidx:] ]
